@@ -1,0 +1,17 @@
+[package]
+name = "pmmp-native"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "pmmpnative"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ext-php-rs = "0.16.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
