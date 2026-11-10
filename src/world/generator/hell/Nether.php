@@ -23,13 +23,17 @@ declare(strict_types=1);
 
 namespace pocketmine\world\generator\hell;
 
+use pocketmine\block\Block;
 use pocketmine\block\VanillaBlocks;
 use pocketmine\data\bedrock\BiomeIds;
 use pocketmine\world\biome\BiomeRegistry;
 use pocketmine\world\ChunkManager;
 use pocketmine\world\format\Chunk;
+use pocketmine\world\format\PalettedBlockArray;
+use pocketmine\world\format\SubChunk;
 use pocketmine\world\generator\Generator;
 use pocketmine\world\generator\InvalidGeneratorOptionsException;
+use pocketmine\world\generator\NativeTerrain;
 use pocketmine\world\generator\noise\Simplex;
 use pocketmine\world\generator\object\OreType;
 use pocketmine\world\generator\populator\Ore;
@@ -69,8 +73,6 @@ class Nether extends Generator{
 	public function generateChunk(ChunkManager $world, int $chunkX, int $chunkZ) : void{
 		$this->random->setSeed(0xdeadbeef ^ ($chunkX << 8) ^ $chunkZ ^ $this->seed);
 
-		$noise = $this->noiseBase->getFastNoise3D(Chunk::EDGE_LENGTH, 128, Chunk::EDGE_LENGTH, 4, 8, 4, $chunkX * Chunk::EDGE_LENGTH, 0, $chunkZ * Chunk::EDGE_LENGTH);
-
 		//TODO: why don't we just create and set the chunk here directly?
 		$chunk = $world->getChunk($chunkX, $chunkZ) ?? throw new \InvalidArgumentException("Chunk $chunkX $chunkZ does not yet exist");
 
@@ -78,24 +80,30 @@ class Nether extends Generator{
 		$netherrack = VanillaBlocks::NETHERRACK()->getStateId();
 		$stillLava = VanillaBlocks::LAVA()->getStateId();
 
-		for($x = 0; $x < Chunk::EDGE_LENGTH; ++$x){
-			for($z = 0; $z < Chunk::EDGE_LENGTH; ++$z){
-				for($y = World::Y_MIN; $y < World::Y_MAX; $y++){
-					$chunk->setBiomeId($x, $y, $z, BiomeIds::HELL);
-				}
+		if(!$this->shapeTerrainNative($chunk, $chunkX, $chunkZ, $bedrock, $netherrack, $stillLava)){
+			//This is the reference implementation of terrain shaping. Any change made here must also be made to the
+			//native implementation, otherwise the results will depend on whether the extension is loaded.
+			$noise = $this->noiseBase->getFastNoise3D(Chunk::EDGE_LENGTH, 128, Chunk::EDGE_LENGTH, 4, 8, 4, $chunkX * Chunk::EDGE_LENGTH, 0, $chunkZ * Chunk::EDGE_LENGTH);
 
-				for($y = 0; $y < 128; ++$y){
-					if($y === 0 || $y === 127){
-						$chunk->setBlockStateId($x, $y, $z, $bedrock);
-						continue;
+			for($x = 0; $x < Chunk::EDGE_LENGTH; ++$x){
+				for($z = 0; $z < Chunk::EDGE_LENGTH; ++$z){
+					for($y = World::Y_MIN; $y < World::Y_MAX; $y++){
+						$chunk->setBiomeId($x, $y, $z, BiomeIds::HELL);
 					}
-					$noiseValue = (abs($this->emptyHeight - $y) / $this->emptyHeight) * $this->emptyAmplitude - $noise[$x][$z][$y];
-					$noiseValue -= 1 - $this->density;
 
-					if($noiseValue > 0){
-						$chunk->setBlockStateId($x, $y, $z, $netherrack);
-					}elseif($y <= $this->waterHeight){
-						$chunk->setBlockStateId($x, $y, $z, $stillLava);
+					for($y = 0; $y < 128; ++$y){
+						if($y === 0 || $y === 127){
+							$chunk->setBlockStateId($x, $y, $z, $bedrock);
+							continue;
+						}
+						$noiseValue = (abs($this->emptyHeight - $y) / $this->emptyHeight) * $this->emptyAmplitude - $noise[$x][$z][$y];
+						$noiseValue -= 1 - $this->density;
+
+						if($noiseValue > 0){
+							$chunk->setBlockStateId($x, $y, $z, $netherrack);
+						}elseif($y <= $this->waterHeight){
+							$chunk->setBlockStateId($x, $y, $z, $stillLava);
+						}
 					}
 				}
 			}
@@ -104,6 +112,44 @@ class Nether extends Generator{
 		foreach($this->generationPopulators as $populator){
 			$populator->populate($world, $chunkX, $chunkZ, $this->random);
 		}
+	}
+
+	/**
+	 * Shapes the terrain using the pmmpnative extension, if it's available.
+	 *
+	 * @return bool whether the chunk was filled
+	 */
+	private function shapeTerrainNative(Chunk $chunk, int $chunkX, int $chunkZ, int $bedrock, int $netherrack, int $stillLava) : bool{
+		foreach($chunk->getSubChunks() as $subChunk){
+			if(!$subChunk->isEmptyFast()){
+				//the PHP implementation leaves blocks it doesn't overwrite alone, which we can't do by replacing subchunks
+				return false;
+			}
+		}
+
+		$layers = NativeTerrain::nether(
+			$this->noiseBase,
+			$chunkX * Chunk::EDGE_LENGTH,
+			$chunkZ * Chunk::EDGE_LENGTH,
+			$this->waterHeight,
+			$this->emptyHeight,
+			$this->emptyAmplitude,
+			$this->density,
+			$bedrock,
+			$netherrack,
+			$stillLava
+		);
+		if($layers === null){
+			return false;
+		}
+
+		foreach($chunk->getSubChunks() as $y => $subChunk){
+			$blocks = isset($layers[$y]) ? [$layers[$y]] : [];
+			$chunk->setSubChunk($y, new SubChunk(Block::EMPTY_STATE_ID, $blocks, new PalettedBlockArray(BiomeIds::HELL)));
+		}
+		$chunk->setTerrainDirtyFlag(Chunk::DIRTY_FLAG_BIOMES, true);
+
+		return true;
 	}
 
 	public function populateChunk(ChunkManager $world, int $chunkX, int $chunkZ) : void{

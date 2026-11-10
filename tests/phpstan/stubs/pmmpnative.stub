@@ -1,0 +1,28 @@
+<?php
+
+/**
+ * Functions provided by the optional pmmpnative extension (see the rust directory).
+ */
+
+/**
+ * @param list<int> $perm
+ *
+ * @return list<list<list<float>>>|null
+ */
+function pmmp_native_simplex_fast_noise_3d(array $perm, float $offset_x, float $offset_y, float $offset_z, int $octaves, float $persistence, float $expansion, int $x_size, int $y_size, int $z_size, int $x_sampling_rate, int $y_sampling_rate, int $z_sampling_rate, int $x, int $y, int $z) : ?array{}
+
+/**
+ * @param list<int> $perm
+ * @param list<float> $min_heights
+ * @param list<float> $max_heights
+ *
+ * @return array<int, int|array{int, string, list<int>}>|null
+ */
+function pmmp_native_normal_terrain(array $perm, float $offset_x, float $offset_y, float $offset_z, int $octaves, float $persistence, float $expansion, int $base_x, int $base_z, int $noise_min, int $noise_max, int $water_height, array $min_heights, array $max_heights, int $empty_id, int $bedrock_id, int $stone_id, int $water_id) : ?array{}
+
+/**
+ * @param list<int> $perm
+ *
+ * @return array<int, int|array{int, string, list<int>}>|null
+ */
+function pmmp_native_nether_terrain(array $perm, float $offset_x, float $offset_y, float $offset_z, int $octaves, float $persistence, float $expansion, int $base_x, int $base_z, int $water_height, int $empty_height, int $empty_amplitude, float $density, int $empty_id, int $bedrock_id, int $netherrack_id, int $lava_id) : ?array{}
