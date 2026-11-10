@@ -37,6 +37,7 @@ use pocketmine\world\generator\biome\BiomeSelector;
 use pocketmine\world\generator\Gaussian;
 use pocketmine\world\generator\Generator;
 use pocketmine\world\generator\InvalidGeneratorOptionsException;
+use pocketmine\world\generator\NativeTerrain;
 use pocketmine\world\generator\noise\Simplex;
 use pocketmine\world\generator\object\OreType;
 use pocketmine\world\generator\populator\GroundCover;
@@ -157,12 +158,19 @@ class Normal extends Generator{
 		//TODO: why don't we just create and set the chunk here directly?
 		$chunk = $world->getChunk($chunkX, $chunkZ) ?? throw new \InvalidArgumentException("Chunk $chunkX $chunkZ does not yet exist");
 
+		$baseX = $chunkX * Chunk::EDGE_LENGTH;
+		$baseZ = $chunkZ * Chunk::EDGE_LENGTH;
+
+		if($this->generateChunkNative($chunk, $baseX, $baseZ)){
+			return;
+		}
+		//Everything below, including the ground cover populator, is the reference implementation of what the native
+		//code does. Any change made here must also be made there, otherwise the results will depend on whether the
+		//extension is loaded.
+
 		$bedrock = VanillaBlocks::BEDROCK()->getStateId();
 		$stillWater = VanillaBlocks::WATER()->getStateId();
 		$stone = VanillaBlocks::STONE()->getStateId();
-
-		$baseX = $chunkX * Chunk::EDGE_LENGTH;
-		$baseZ = $chunkZ * Chunk::EDGE_LENGTH;
 
 		[$biomeArray, $minNoiseHeights, $maxNoiseHeights] = $this->generateBiomes($baseX, $baseZ);
 
@@ -233,6 +241,37 @@ class Normal extends Generator{
 		foreach($this->generationPopulators as $populator){
 			$populator->populate($world, $chunkX, $chunkZ, $this->random);
 		}
+	}
+
+	/**
+	 * Generates the chunk using the pmmpnative extension, if it's available.
+	 *
+	 * @return bool whether the chunk was generated
+	 */
+	private function generateChunkNative(Chunk $chunk, int $baseX, int $baseZ) : bool{
+		$result = NativeTerrain::normal(
+			$this->noiseBase,
+			$this->selector,
+			$this->gaussian,
+			$this->seed,
+			$baseX,
+			$baseZ,
+			$this->waterHeight,
+			VanillaBlocks::BEDROCK(),
+			VanillaBlocks::STONE(),
+			VanillaBlocks::WATER()
+		);
+		if($result === null){
+			return false;
+		}
+
+		[$biomeArray, $blockLayers] = $result;
+		foreach($chunk->getSubChunks() as $y => $subChunk){
+			$blocks = isset($blockLayers[$y]) ? [$blockLayers[$y]] : [];
+			$chunk->setSubChunk($y, new SubChunk(Block::EMPTY_STATE_ID, $blocks, clone $biomeArray));
+		}
+
+		return true;
 	}
 
 	public function populateChunk(ChunkManager $world, int $chunkX, int $chunkZ) : void{

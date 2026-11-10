@@ -24,6 +24,8 @@ declare(strict_types=1);
 namespace pocketmine\world\generator\noise;
 
 use pocketmine\utils\Random;
+use function array_values;
+use function extension_loaded;
 use const M_SQRT3;
 
 /**
@@ -32,6 +34,8 @@ use const M_SQRT3;
  * This is a modified version of the freely published version in the paper by
  * Stefan Gustavson at
  * http://staffwww.itn.liu.se/~stegu/simplexnoise/simplexnoise.pdf
+ *
+ * @phpstan-type NativeSimplexParameters array{list<int>, float, float, float, int, float, float}
  */
 class Simplex extends Noise{
 	protected const grad3 = [
@@ -80,6 +84,32 @@ class Simplex extends Noise{
 		//previously this value would be used for offsetW
 		//TODO: this really needs to reset the RNG seed to avoid future RNG contamination
 		$random->nextSignedInt();
+	}
+
+	/**
+	 * Returns the description of this noise accepted by functions of the optional pmmpnative extension, or null
+	 * if native code can't be used. Subclasses may alter the noise function, so this only works for the base class.
+	 *
+	 * @internal
+	 * @return mixed[]|null
+	 * @phpstan-return NativeSimplexParameters|null
+	 */
+	public function getNativeParameters() : ?array{
+		if(static::class !== self::class || !extension_loaded('pmmpnative')){
+			return null;
+		}
+		return [array_values($this->perm), $this->offsetX, $this->offsetY, $this->offsetZ, $this->octaves, $this->persistence, $this->expansion];
+	}
+
+	public function getFastNoise3D(int $xSize, int $ySize, int $zSize, int $xSamplingRate, int $ySamplingRate, int $zSamplingRate, int $x, int $y, int $z) : array{
+		$noiseParameters = $this->getNativeParameters();
+		if($noiseParameters !== null){
+			$noiseArray = \pmmp_native_simplex_fast_noise_3d($noiseParameters, $xSize, $ySize, $zSize, $xSamplingRate, $ySamplingRate, $zSamplingRate, $x, $y, $z);
+			if($noiseArray !== null){
+				return $noiseArray;
+			}
+		}
+		return parent::getFastNoise3D($xSize, $ySize, $zSize, $xSamplingRate, $ySamplingRate, $zSamplingRate, $x, $y, $z);
 	}
 
 	public function getNoise3D($x, $y, $z){
