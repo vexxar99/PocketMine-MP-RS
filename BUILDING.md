@@ -31,3 +31,16 @@ You can also use the `--out` option to change the output filename.
 
 ## Running PocketMine-MP from source code
 Run `src/PocketMine.php` using your preferred PHP binary.
+
+## Building the optional `pmmpnative` extension
+Some CPU-heavy parts of world generation have a native implementation written in Rust, in the `rust` directory. It is built as a PHP extension. PocketMine-MP works without it and generates exactly the same terrain either way; the extension only makes it faster.
+
+Pre-requisites: a Rust toolchain (`cargo`), `clang`/`libclang`, and the headers and `php-config` of the PHP build the server runs on. The extension must be built for the same PHP minor version and thread-safety mode (the PMMP binaries are ZTS).
+
+1. `cd rust`
+2. `PHP=/path/to/php PHP_CONFIG=/path/to/php-config cargo build --release`
+3. Add `extension=/path/to/rust/target/release/libpmmpnative.so` to your `php.ini`.
+
+Run `cargo test` in the `rust` directory for the Rust unit tests. `tests/phpunit/world/generator/NativeTerrainTest.php` compares the native results against the PHP implementation, and is skipped unless the extension is loaded.
+
+The PHP code remains the reference implementation. If you change `Simplex`, `Noise::getFastNoise3D()` or the terrain shaping in the `Normal` or `Nether` generators, make the same change in `rust/src`.
