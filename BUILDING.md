@@ -43,4 +43,4 @@ Pre-requisites: a Rust toolchain (`cargo`), `clang`/`libclang`, and the headers 
 
 Run `cargo test` in the `rust` directory for the Rust unit tests. `tests/phpunit/world/generator/NativeTerrainTest.php` compares the native results against the PHP implementation, and is skipped unless the extension is loaded.
 
-The PHP code remains the reference implementation. If you change `Simplex`, `Noise::getFastNoise3D()` or the terrain shaping in the `Normal` or `Nether` generators, make the same change in `rust/src`.
+The PHP code remains the reference implementation. If you change anything the native code replaces, make the same change in `rust/src`: `Simplex`, `Noise::noise2D()`, `Noise::getFastNoise3D()`, `BiomeSelector::pickBiome()`, `Normal::generateChunk()` (including biome selection and elevation smoothing), the `GroundCover` populator, and the terrain shaping in `Nether::generateChunk()`.

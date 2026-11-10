@@ -34,6 +34,8 @@ use const M_SQRT3;
  * This is a modified version of the freely published version in the paper by
  * Stefan Gustavson at
  * http://staffwww.itn.liu.se/~stegu/simplexnoise/simplexnoise.pdf
+ *
+ * @phpstan-type NativeSimplexParameters array{list<int>, float, float, float, int, float, float}
  */
 class Simplex extends Noise{
 	protected const grad3 = [
@@ -85,12 +87,12 @@ class Simplex extends Noise{
 	}
 
 	/**
-	 * Returns the leading arguments describing this noise for functions of the optional pmmpnative extension, or null
+	 * Returns the description of this noise accepted by functions of the optional pmmpnative extension, or null
 	 * if native code can't be used. Subclasses may alter the noise function, so this only works for the base class.
 	 *
 	 * @internal
 	 * @return mixed[]|null
-	 * @phpstan-return array{list<int>, float, float, float, int, float, float}|null
+	 * @phpstan-return NativeSimplexParameters|null
 	 */
 	public function getNativeParameters() : ?array{
 		if(static::class !== self::class || !extension_loaded('pmmpnative')){
@@ -102,7 +104,7 @@ class Simplex extends Noise{
 	public function getFastNoise3D(int $xSize, int $ySize, int $zSize, int $xSamplingRate, int $ySamplingRate, int $zSamplingRate, int $x, int $y, int $z) : array{
 		$noiseParameters = $this->getNativeParameters();
 		if($noiseParameters !== null){
-			$noiseArray = \pmmp_native_simplex_fast_noise_3d(...$noiseParameters, ...[$xSize, $ySize, $zSize, $xSamplingRate, $ySamplingRate, $zSamplingRate, $x, $y, $z]);
+			$noiseArray = \pmmp_native_simplex_fast_noise_3d($noiseParameters, $xSize, $ySize, $zSize, $xSamplingRate, $ySamplingRate, $zSamplingRate, $x, $y, $z);
 			if($noiseArray !== null){
 				return $noiseArray;
 			}

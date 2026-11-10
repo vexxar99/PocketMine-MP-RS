@@ -28,7 +28,11 @@ use pocketmine\world\biome\Biome;
 use pocketmine\world\biome\BiomeRegistry;
 use pocketmine\world\biome\UnknownBiome;
 use pocketmine\world\generator\noise\Simplex;
+use function count;
 
+/**
+ * @phpstan-import-type NativeSimplexParameters from Simplex
+ */
 abstract class BiomeSelector{
 	private Simplex $temperature;
 	private Simplex $rainfall;
@@ -38,6 +42,18 @@ abstract class BiomeSelector{
 	 * @phpstan-var \SplFixedArray<Biome>
 	 */
 	private \SplFixedArray $map;
+
+	/**
+	 * Same as the map, but biome IDs instead of biomes. Empty if native code can't be used with this selector.
+	 * @var int[]
+	 * @phpstan-var list<int>
+	 */
+	private array $nativeBiomeIds = [];
+	/**
+	 * @var Biome[] biome ID => biome, for every biome in the map
+	 * @phpstan-var array<int, Biome>
+	 */
+	private array $nativeBiomes = [];
 
 	public function __construct(Random $random){
 		$this->temperature = new Simplex($random, 2, 1 / 16, 1 / 512);
@@ -64,6 +80,36 @@ abstract class BiomeSelector{
 				$this->map[$i + ($j << 6)] = $biome;
 			}
 		}
+
+		$this->nativeBiomeIds = [];
+		$this->nativeBiomes = [];
+		foreach(["pickBiome", "getTemperature", "getRainfall"] as $method){
+			if((new \ReflectionMethod($this, $method))->getDeclaringClass()->getName() !== self::class){
+				//native code can't know what an overridden method does
+				return;
+			}
+		}
+		foreach($this->map as $biome){
+			$this->nativeBiomeIds[] = $biome->getId();
+			$this->nativeBiomes[$biome->getId()] = $biome;
+		}
+	}
+
+	/**
+	 * Returns the description of this selector accepted by functions of the optional pmmpnative extension, or null
+	 * if native code can't be used.
+	 *
+	 * @internal
+	 * @return mixed[]|null
+	 * @phpstan-return array{NativeSimplexParameters, NativeSimplexParameters, list<int>, array<int, Biome>}|null
+	 */
+	public function getNativeParameters() : ?array{
+		$temperature = $this->temperature->getNativeParameters();
+		$rainfall = $this->rainfall->getNativeParameters();
+		if($temperature === null || $rainfall === null || count($this->nativeBiomeIds) === 0){
+			return null;
+		}
+		return [$temperature, $rainfall, $this->nativeBiomeIds, $this->nativeBiomes];
 	}
 
 	public function getTemperature(float $x, float $z) : float{

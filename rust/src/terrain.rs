@@ -10,23 +10,23 @@ use crate::simplex::Simplex;
 pub const MIN_SUBCHUNK_INDEX: i64 = -4;
 pub const MAX_SUBCHUNK_INDEX: i64 = 19;
 const SUBCHUNK_COUNT: usize = (MAX_SUBCHUNK_INDEX - MIN_SUBCHUNK_INDEX + 1) as usize;
-const CHUNK_EDGE: usize = 16;
-const COLUMNS: usize = CHUNK_EDGE * CHUNK_EDGE;
+pub(crate) const CHUNK_EDGE: usize = 16;
+pub(crate) const COLUMNS: usize = CHUNK_EDGE * CHUNK_EDGE;
 
 /// Elevations beyond this can't produce a valid chunk anyway.
-const MAX_ELEVATION: f64 = 1_000_000.0;
+pub(crate) const MAX_ELEVATION: f64 = 1_000_000.0;
 
 /// Block layers by subchunk Y. Subchunks without an entry have no block layers.
 pub type Layers = Vec<(i64, Layer)>;
 
-struct ChunkBlocks {
+pub(crate) struct ChunkBlocks {
     empty_id: u32,
     blocks: Vec<u32>,
     has_layer: [bool; SUBCHUNK_COUNT],
 }
 
 impl ChunkBlocks {
-    fn new(empty_id: u32) -> Self {
+    pub(crate) fn new(empty_id: u32) -> Self {
         Self { empty_id, blocks: vec![empty_id; SUBCHUNK_COUNT * SUBCHUNK_VOLUME], has_layer: [false; SUBCHUNK_COUNT] }
     }
 
@@ -37,7 +37,7 @@ impl ChunkBlocks {
     }
 
     /// Returns `None` if the Y coordinate is outside the world, where `Chunk::setBlockStateId()` would throw.
-    fn set(&mut self, x: usize, y: i64, z: usize, id: u32) -> Option<()> {
+    pub(crate) fn set(&mut self, x: usize, y: i64, z: usize, id: u32) -> Option<()> {
         let subchunk_y = y >> 4;
         if !(MIN_SUBCHUNK_INDEX..=MAX_SUBCHUNK_INDEX).contains(&subchunk_y) {
             return None;
@@ -48,7 +48,31 @@ impl ChunkBlocks {
         Some(())
     }
 
-    fn into_layers(self) -> Layers {
+    /// Returns `None` outside the world, where `Chunk::getBlockStateId()` would throw.
+    pub(crate) fn get(&self, x: usize, y: i64, z: usize) -> Option<u32> {
+        let subchunk_y = y >> 4;
+        if !(MIN_SUBCHUNK_INDEX..=MAX_SUBCHUNK_INDEX).contains(&subchunk_y) {
+            return None;
+        }
+        let index = (subchunk_y - MIN_SUBCHUNK_INDEX) as usize;
+        Some(self.blocks[index * SUBCHUNK_VOLUME + ((x << 8) | (z << 4) | (y & 0xf) as usize)])
+    }
+
+    /// Equivalent of `Chunk::getHighestBlockAt()`.
+    pub(crate) fn highest_block_at(&self, x: usize, z: usize) -> Option<i64> {
+        for index in (0..SUBCHUNK_COUNT).rev() {
+            if !self.has_layer[index] {
+                continue;
+            }
+            let column = index * SUBCHUNK_VOLUME + ((x << 8) | (z << 4));
+            if let Some(y) = (0..16).rev().find(|&y| self.blocks[column + y] != self.empty_id) {
+                return Some(y as i64 + (index as i64 + MIN_SUBCHUNK_INDEX) * 16);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn into_layers(self) -> Layers {
         let mut layers = Vec::new();
         for (index, blocks) in self.blocks.chunks(SUBCHUNK_VOLUME).enumerate() {
             if !self.has_layer[index] {
@@ -80,6 +104,10 @@ pub struct NormalTerrain<'a> {
 }
 
 pub fn normal_terrain(noise: &Simplex, params: &NormalTerrain) -> Option<Layers> {
+    shape_normal_terrain(noise, params).map(ChunkBlocks::into_layers)
+}
+
+pub(crate) fn shape_normal_terrain(noise: &Simplex, params: &NormalTerrain) -> Option<ChunkBlocks> {
     const SAMPLING_RATE_Y: i64 = 8;
 
     let NormalTerrain { noise_min, noise_max, water_height, .. } = *params;
@@ -153,7 +181,7 @@ pub fn normal_terrain(noise: &Simplex, params: &NormalTerrain) -> Option<Layers>
         }
     }
 
-    Some(chunk.into_layers())
+    Some(chunk)
 }
 
 pub struct NetherTerrain {
