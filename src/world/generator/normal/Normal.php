@@ -158,12 +158,19 @@ class Normal extends Generator{
 		//TODO: why don't we just create and set the chunk here directly?
 		$chunk = $world->getChunk($chunkX, $chunkZ) ?? throw new \InvalidArgumentException("Chunk $chunkX $chunkZ does not yet exist");
 
+		$baseX = $chunkX * Chunk::EDGE_LENGTH;
+		$baseZ = $chunkZ * Chunk::EDGE_LENGTH;
+
+		if($this->generateChunkNative($chunk, $baseX, $baseZ)){
+			return;
+		}
+		//Everything below, including the ground cover populator, is the reference implementation of what the native
+		//code does. Any change made here must also be made there, otherwise the results will depend on whether the
+		//extension is loaded.
+
 		$bedrock = VanillaBlocks::BEDROCK()->getStateId();
 		$stillWater = VanillaBlocks::WATER()->getStateId();
 		$stone = VanillaBlocks::STONE()->getStateId();
-
-		$baseX = $chunkX * Chunk::EDGE_LENGTH;
-		$baseZ = $chunkZ * Chunk::EDGE_LENGTH;
 
 		[$biomeArray, $minNoiseHeights, $maxNoiseHeights] = $this->generateBiomes($baseX, $baseZ);
 
@@ -175,69 +182,57 @@ class Normal extends Generator{
 		$noiseMin = (int) floor($lowestNoiseBlock / self::NOISE_SAMPLING_RATE_Y) * self::NOISE_SAMPLING_RATE_Y;
 		$noiseMax = (int) ceil($highestNoiseBlock / self::NOISE_SAMPLING_RATE_Y) * self::NOISE_SAMPLING_RATE_Y;
 
+		//we only need to generate noise for the blocks which could be affected
+		//outside these bounds we'll just flood-fill blocks to save time
+		$noise = $this->noiseBase->getFastNoise3D(
+			xSize: Chunk::EDGE_LENGTH,
+			ySize: $noiseMax - $noiseMin,
+			zSize: Chunk::EDGE_LENGTH,
+			xSamplingRate: 4,
+			ySamplingRate: self::NOISE_SAMPLING_RATE_Y,
+			zSamplingRate: 4,
+			x: $chunkX * Chunk::EDGE_LENGTH,
+			y: $noiseMin,
+			z: $chunkZ * Chunk::EDGE_LENGTH
+		);
+
 		$minNoiseSubChunk = (int) floor($noiseMin / SubChunk::EDGE_LENGTH);
-
-		$nativeLayers = $this->shapeTerrainNative($baseX, $baseZ, $noiseMin, $noiseMax, $minNoiseHeights, $maxNoiseHeights);
-		if($nativeLayers !== null){
-			foreach($chunk->getSubChunks() as $y => $subChunk){
-				$blocks = isset($nativeLayers[$y]) ? [$nativeLayers[$y]] : [];
-				$chunk->setSubChunk($y, new SubChunk(Block::EMPTY_STATE_ID, $blocks, clone $biomeArray));
+		foreach($chunk->getSubChunks() as $y => $subChunk){
+			if($y >= 0 && $y < $minNoiseSubChunk){
+				//Everything above 0 and below noiseMin is always solid stone, which can be flood-filled instead of
+				//setting the blocks one at a time - this is vastly faster
+				$blocks = [new PalettedBlockArray($stone)];
+			}else{
+				$blocks = [];
 			}
-		}else{
-			//This is the reference implementation of terrain shaping. Any change made here must also be made to the
-			//native implementation, otherwise the results will depend on whether the extension is loaded.
+			$chunk->setSubChunk($y, new SubChunk(Block::EMPTY_STATE_ID, $blocks, clone $biomeArray));
+		}
 
-			//we only need to generate noise for the blocks which could be affected
-			//outside these bounds we'll just flood-fill blocks to save time
-			$noise = $this->noiseBase->getFastNoise3D(
-				xSize: Chunk::EDGE_LENGTH,
-				ySize: $noiseMax - $noiseMin,
-				zSize: Chunk::EDGE_LENGTH,
-				xSamplingRate: 4,
-				ySamplingRate: self::NOISE_SAMPLING_RATE_Y,
-				zSamplingRate: 4,
-				x: $chunkX * Chunk::EDGE_LENGTH,
-				y: $noiseMin,
-				z: $chunkZ * Chunk::EDGE_LENGTH
-			);
+		for($x = 0; $x < Chunk::EDGE_LENGTH; ++$x){
+			for($z = 0; $z < Chunk::EDGE_LENGTH; ++$z){
+				$chunk->setBlockStateId($x, 0, $z, $bedrock);
 
-			foreach($chunk->getSubChunks() as $y => $subChunk){
-				if($y >= 0 && $y < $minNoiseSubChunk){
-					//Everything above 0 and below noiseMin is always solid stone, which can be flood-filled instead of
-					//setting the blocks one at a time - this is vastly faster
-					$blocks = [new PalettedBlockArray($stone)];
-				}else{
-					$blocks = [];
+				$columnIndex = World::chunkHash($x, $z);
+				$minSum = $minNoiseHeights[$columnIndex];
+				$maxSum = $maxNoiseHeights[$columnIndex];
+				$maxBlockY = max($maxSum, $this->waterHeight);
+				$smoothHeight = ($maxSum - $minSum) / 2;
+
+				//Everything below minSum is always solid stone - we already flood-filled the subchunks below though, so
+				//we only need to fill the gap in the column here
+				for($y = $minNoiseSubChunk * SubChunk::EDGE_LENGTH; $y < $minSum; $y++){
+					$chunk->setBlockStateId($x, $y, $z, $stone);
 				}
-				$chunk->setSubChunk($y, new SubChunk(Block::EMPTY_STATE_ID, $blocks, clone $biomeArray));
-			}
+				for($y = (int) floor($minSum); $y <= $maxBlockY; ++$y){
+					//noiseValue would anyway be <= 0 above maxSum because the smoothing term is >= 1
+					$noiseValue = $y > $noiseMax ?
+						-1 :
+						$noise[$x][$z][$y - $noiseMin] - 1 / $smoothHeight * ($y - $smoothHeight - $minSum);
 
-			for($x = 0; $x < Chunk::EDGE_LENGTH; ++$x){
-				for($z = 0; $z < Chunk::EDGE_LENGTH; ++$z){
-					$chunk->setBlockStateId($x, 0, $z, $bedrock);
-
-					$columnIndex = World::chunkHash($x, $z);
-					$minSum = $minNoiseHeights[$columnIndex];
-					$maxSum = $maxNoiseHeights[$columnIndex];
-					$maxBlockY = max($maxSum, $this->waterHeight);
-					$smoothHeight = ($maxSum - $minSum) / 2;
-
-					//Everything below minSum is always solid stone - we already flood-filled the subchunks below though, so
-					//we only need to fill the gap in the column here
-					for($y = $minNoiseSubChunk * SubChunk::EDGE_LENGTH; $y < $minSum; $y++){
+					if($noiseValue > 0){
 						$chunk->setBlockStateId($x, $y, $z, $stone);
-					}
-					for($y = (int) floor($minSum); $y <= $maxBlockY; ++$y){
-						//noiseValue would anyway be <= 0 above maxSum because the smoothing term is >= 1
-						$noiseValue = $y > $noiseMax ?
-							-1 :
-							$noise[$x][$z][$y - $noiseMin] - 1 / $smoothHeight * ($y - $smoothHeight - $minSum);
-
-						if($noiseValue > 0){
-							$chunk->setBlockStateId($x, $y, $z, $stone);
-						}elseif($y <= $this->waterHeight){
-							$chunk->setBlockStateId($x, $y, $z, $stillWater);
-						}
+					}elseif($y <= $this->waterHeight){
+						$chunk->setBlockStateId($x, $y, $z, $stillWater);
 					}
 				}
 			}
@@ -249,44 +244,34 @@ class Normal extends Generator{
 	}
 
 	/**
-	 * Shapes the terrain using the pmmpnative extension, if it's available.
+	 * Generates the chunk using the pmmpnative extension, if it's available.
 	 *
-	 * @param float[] $minNoiseHeights
-	 * @param float[] $maxNoiseHeights
-	 * @phpstan-param non-empty-array<int, float> $minNoiseHeights
-	 * @phpstan-param non-empty-array<int, float> $maxNoiseHeights
-	 *
-	 * @return PalettedBlockArray[]|null
-	 * @phpstan-return array<int, PalettedBlockArray>|null
+	 * @return bool whether the chunk was generated
 	 */
-	private function shapeTerrainNative(int $baseX, int $baseZ, int $noiseMin, int $noiseMax, array $minNoiseHeights, array $maxNoiseHeights) : ?array{
-		if($this->noiseBase->getNativeParameters() === null){
-			return null;
-		}
-
-		$minHeights = [];
-		$maxHeights = [];
-		for($x = 0; $x < Chunk::EDGE_LENGTH; ++$x){
-			for($z = 0; $z < Chunk::EDGE_LENGTH; ++$z){
-				$columnIndex = World::chunkHash($x, $z);
-				$minHeights[] = (float) $minNoiseHeights[$columnIndex];
-				$maxHeights[] = (float) $maxNoiseHeights[$columnIndex];
-			}
-		}
-
-		return NativeTerrain::normal(
+	private function generateChunkNative(Chunk $chunk, int $baseX, int $baseZ) : bool{
+		$result = NativeTerrain::normal(
 			$this->noiseBase,
+			$this->selector,
+			$this->gaussian,
+			$this->seed,
 			$baseX,
 			$baseZ,
-			$noiseMin,
-			$noiseMax,
 			$this->waterHeight,
-			$minHeights,
-			$maxHeights,
-			VanillaBlocks::BEDROCK()->getStateId(),
-			VanillaBlocks::STONE()->getStateId(),
-			VanillaBlocks::WATER()->getStateId()
+			VanillaBlocks::BEDROCK(),
+			VanillaBlocks::STONE(),
+			VanillaBlocks::WATER()
 		);
+		if($result === null){
+			return false;
+		}
+
+		[$biomeArray, $blockLayers] = $result;
+		foreach($chunk->getSubChunks() as $y => $subChunk){
+			$blocks = isset($blockLayers[$y]) ? [$blockLayers[$y]] : [];
+			$chunk->setSubChunk($y, new SubChunk(Block::EMPTY_STATE_ID, $blocks, clone $biomeArray));
+		}
+
+		return true;
 	}
 
 	public function populateChunk(ChunkManager $world, int $chunkX, int $chunkZ) : void{

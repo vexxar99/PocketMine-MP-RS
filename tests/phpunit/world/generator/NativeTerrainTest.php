@@ -32,7 +32,6 @@ use pocketmine\world\generator\noise\Simplex;
 use pocketmine\world\generator\normal\Normal;
 use pocketmine\world\SimpleChunkManager;
 use pocketmine\world\World;
-use function array_fill;
 use function array_keys;
 use function count;
 use function extension_loaded;
@@ -95,11 +94,11 @@ class NativeTerrainTest extends TestCase{
 	 * The comparisons below would pass vacuously if the native code always deferred to PHP.
 	 */
 	public function testNativeCodeHandlesOrdinaryInput() : void{
-		$heights = static fn(float $height) : array => array_fill(0, Chunk::EDGE_LENGTH ** 2, $height);
-
-		$overworld = NativeTerrain::normal(new Simplex(new Random(1337), 4, 1 / 4, 1 / 32), 0, 0, 40, 80, 62, $heights(45.0), $heights(74.0), 1, 2, 3);
-		self::assertNotNull($overworld);
-		self::assertSame([0, 1, 2, 3, 4], array_keys($overworld));
+		$overworld = new Normal(1337, "");
+		$generateChunkNative = new \ReflectionMethod($overworld, "generateChunkNative");
+		foreach([[0, 0], [-640, 4800]] as [$baseX, $baseZ]){
+			self::assertTrue($generateChunkNative->invoke($overworld, new Chunk([], false), $baseX, $baseZ));
+		}
 
 		$nether = NativeTerrain::nether(new Simplex(new Random(1337), 4, 1 / 4, 1 / 64), 0, 0, 32, 64, 1, 0.5, 1, 2, 3);
 		self::assertNotNull($nether);
