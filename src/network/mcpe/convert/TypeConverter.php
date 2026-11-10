@@ -50,7 +50,6 @@ use pocketmine\network\mcpe\protocol\types\GameMode as ProtocolGameMode;
 use pocketmine\network\mcpe\protocol\types\inventory\ItemStack;
 use pocketmine\network\mcpe\protocol\types\inventory\ItemStackExtraData;
 use pocketmine\network\mcpe\protocol\types\inventory\ItemStackExtraDataShield;
-use pocketmine\network\mcpe\protocol\types\recipe\IntIdMetaItemDescriptor;
 use pocketmine\network\mcpe\protocol\types\recipe\RecipeIngredient as ProtocolRecipeIngredient;
 use pocketmine\network\mcpe\protocol\types\recipe\StringIdMetaItemDescriptor;
 use pocketmine\network\mcpe\protocol\types\recipe\TagItemDescriptor;
@@ -122,7 +121,7 @@ class TypeConverter{
 	 *
 	 * @internal
 	 */
-	public function coreGameModeToProtocol(GameMode $gamemode) : int{
+	public function coreGameModeToProtocol(GameMode $gamemode) : ProtocolGameMode{
 		return match($gamemode){
 			GameMode::SURVIVAL => ProtocolGameMode::SURVIVAL,
 			//TODO: native spectator support
@@ -131,7 +130,7 @@ class TypeConverter{
 		};
 	}
 
-	public function protocolGameModeToCore(int $gameMode) : ?GameMode{
+	public function protocolGameModeToCore(ProtocolGameMode $gameMode) : ?GameMode{
 		return match($gameMode){
 			ProtocolGameMode::SURVIVAL => GameMode::SURVIVAL,
 			ProtocolGameMode::CREATIVE => GameMode::CREATIVE,
@@ -147,9 +146,9 @@ class TypeConverter{
 			return new ProtocolRecipeIngredient(null, 0);
 		}
 		if($ingredient instanceof MetaWildcardRecipeIngredient){
-			$id = $this->itemTypeDictionary->fromStringId($ingredient->getItemId());
+			$id = $ingredient->getItemId();
 			$meta = self::RECIPE_INPUT_WILDCARD_META;
-			$descriptor = new IntIdMetaItemDescriptor($id, $meta);
+			$descriptor = new StringIdMetaItemDescriptor($id, $meta);
 		}elseif($ingredient instanceof ExactRecipeIngredient){
 			$item = $ingredient->getItem();
 			[$id, $meta, $blockRuntimeId] = $this->itemTranslator->toNetworkId($item);
@@ -159,7 +158,8 @@ class TypeConverter{
 					throw new AssumptionFailedError("Every block state should have an associated meta value");
 				}
 			}
-			$descriptor = new IntIdMetaItemDescriptor($id, $meta);
+			$id = $this->itemTypeDictionary->fromIntId($id);
+			$descriptor = new StringIdMetaItemDescriptor($id, $meta);
 		}elseif($ingredient instanceof TagWildcardRecipeIngredient){
 			$descriptor = new TagItemDescriptor($ingredient->getTagName());
 		}else{
@@ -179,10 +179,7 @@ class TypeConverter{
 			return new TagWildcardRecipeIngredient($descriptor->getTag());
 		}
 
-		if($descriptor instanceof IntIdMetaItemDescriptor){
-			$stringId = $this->itemTypeDictionary->fromIntId($descriptor->getId());
-			$meta = $descriptor->getMeta();
-		}elseif($descriptor instanceof StringIdMetaItemDescriptor){
+		if($descriptor instanceof StringIdMetaItemDescriptor){
 			$stringId = $descriptor->getId();
 			$meta = $descriptor->getMeta();
 		}else{
