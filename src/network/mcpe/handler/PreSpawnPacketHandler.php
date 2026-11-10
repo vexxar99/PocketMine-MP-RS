@@ -71,6 +71,12 @@ class PreSpawnPacketHandler extends PacketHandler{
 
 			$typeConverter = $this->session->getTypeConverter();
 
+			$this->session->getLogger()->debug("Sending JigsawStructureData");
+			$this->session->sendDataPacket(StaticPacketCache::getInstance()->getJigsawStructureData());
+
+			$this->session->getLogger()->debug("Sending VoxelShapesPacket");
+			$this->session->sendDataPacket(StaticPacketCache::getInstance()->getVoxelShapes());
+
 			$this->session->getLogger()->debug("Preparing StartGamePacket");
 			$levelSettings = new LevelSettings();
 			$levelSettings->seed = -1;
@@ -81,6 +87,7 @@ class PreSpawnPacketHandler extends PacketHandler{
 			$levelSettings->hasAchievementsDisabled = true;
 			$levelSettings->time = $world->getTime();
 			$levelSettings->eduEditionOffer = 0;
+			$levelSettings->hasEduFeaturesEnabled = true; //required for education items to render
 			$levelSettings->rainLevel = 0; //TODO: implement these properly
 			$levelSettings->lightningLevel = 0;
 			$levelSettings->commandsEnabled = true;
@@ -113,10 +120,9 @@ class PreSpawnPacketHandler extends PacketHandler{
 				false,
 				false,
 				new NetworkPermissions(disableClientSounds: true),
-				true,
 				null,
 				new ServerTelemetryData("", "", "", ""),
-				[],
+				StaticPacketCache::getInstance()->getBlockPaletteEntries(),
 				0,
 			));
 
