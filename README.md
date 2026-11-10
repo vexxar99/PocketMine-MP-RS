@@ -61,6 +61,24 @@ If you just want to play **vanilla survival multiplayer**, consider using the [o
 
 If that's not an option for you, you may be able to add some of PocketMine-MP's missing features using plugins from [Poggit](https://poggit.pmmp.io/plugins), or write plugins to implement them yourself.
 
+## Native world generation (Rust)
+This fork adds `pmmpnative`, an optional PHP extension written in Rust (see the [`rust`](rust) directory), which replaces the slowest parts of world generation with native code:
+
+- Overworld chunk generation: biome selection, elevation smoothing, terrain shaping and ground cover
+- Nether terrain shaping
+- `Simplex::getFastNoise3D()`, which plugin generators can also benefit from
+
+| Per chunk | PHP only | With `pmmpnative` |
+|---|---|---|
+| Overworld generation | 4.8 ms | 0.30 ms |
+| Nether generation | 19.8 ms | 0.30 ms |
+
+Measured on the PMMP PHP 8.3 binary on Linux x86_64. Chunk population (ores, trees, tall grass) still runs in PHP and is not included.
+
+The extension is optional. Without it the server runs the PHP code exactly as before, and the generated terrain is identical either way. Plugins which subclass `Simplex` or override the noise methods of `BiomeSelector` automatically use the PHP code.
+
+The extension is not included in the PMMP PHP binaries; see [BUILDING.md](BUILDING.md#building-the-optional-pmmpnative-extension) for how to build and load it. It has only been built and tested on Linux x86_64 with PHP 8.3 (ZTS) so far.
+
 ## Getting Started
 - [Documentation](http://pmmp.readthedocs.org/)
 - [Installation instructions](https://pmmp.readthedocs.io/en/rtfd/installation.html)
